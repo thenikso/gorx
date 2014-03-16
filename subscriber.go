@@ -44,7 +44,7 @@ func (s *subscriber) Disposable() Disposable {
 	return s.disposable
 }
 
-func newSubstriber(next func(interface{}), err func(error), complete func()) *subscriber {
+func newSubscriber(next func(interface{}), err func(error), complete func()) *subscriber {
 	var subscriber = &subscriber{
 		nextFunc: next,
 		errFunc:  err,

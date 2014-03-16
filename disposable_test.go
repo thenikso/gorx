@@ -51,10 +51,9 @@ func TestMultipleDispositionChan(t *testing.T) {
 	d := NewDisposable(nil)
 	receivedChanDefault := false
 	receivedChan1 := false
-	receivedChan2 := false
 	receivedChan3 := false
-	chan1 := make(chan bool)
-	chan2 := make(chan bool, 1)
+	chan1 := make(chan bool, 1)
+	chan2 := make(chan bool)
 	chan3 := make(chan bool)
 	testTermChan := make(chan bool)
 	go func() {
@@ -64,15 +63,13 @@ func TestMultipleDispositionChan(t *testing.T) {
 				receivedChanDefault = true
 			case <-chan1:
 				receivedChan1 = true
-			case <-chan2:
-				receivedChan2 = true
 			case <-chan3:
 				receivedChan3 = true
 			case <-time.After(1000):
 				testTermChan <- true
 				return
 			default:
-				if receivedChanDefault && receivedChan1 && receivedChan2 && receivedChan3 {
+				if receivedChanDefault && receivedChan1 && receivedChan3 {
 					testTermChan <- true
 					return
 				}
@@ -84,7 +81,10 @@ func TestMultipleDispositionChan(t *testing.T) {
 	d.Dispose()
 	d.AddDispositionChan(chan3)
 	<-testTermChan
-	if !receivedChanDefault || !receivedChan1 || !receivedChan2 || !receivedChan3 {
+	if !d.IsDisposed() {
+		t.Error("Expect disposable to dispose")
+	}
+	if !receivedChanDefault || !receivedChan1 || !receivedChan3 {
 		t.Error("Expecting multiple disposition channels to be signaled properly")
 	}
 }

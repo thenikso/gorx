@@ -49,7 +49,7 @@ func newSubstriber(next func(interface{}), err func(error), complete func()) *su
 		nextFunc: next,
 		errFunc:  err,
 		compFunc: complete,
-		dispChan: make(chan bool),
+		dispChan: make(chan bool, 1),
 	}
 	if next != nil {
 		subscriber.nextChan = make(chan interface{})

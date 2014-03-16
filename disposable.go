@@ -1,5 +1,7 @@
 package rx
 
+import "time"
+
 type Disposable interface {
 	Dispose()
 	DispositionChan() <-chan bool
@@ -31,15 +33,19 @@ func (d *disposable) disposeImpl() {
 	if d.disposed == true {
 		return
 	}
+	for _, c := range d.dispositionChans {
+		go func(c chan<- bool) {
+			select {
+			case c <- true:
+			case <-time.After(1 * time.Second):
+			}
+		}(c)
+	}
 	d.disposed = true
 	for _, callback := range d.callbacks {
 		callback()
 	}
 	d.callbacks = nil
-	// TODO maybe a go routine for each send
-	for _, c := range d.dispositionChans {
-		c <- true
-	}
 	d.dispositionChan = nil
 	d.dispositionChans = nil
 	d.canDisposeChan = nil

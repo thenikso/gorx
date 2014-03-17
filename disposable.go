@@ -12,43 +12,35 @@ type Disposable interface {
 
 type disposable struct {
 	Disposable
-	canDisposeChan   chan bool
+
+	disposed  bool
+	callbacks []func()
+
 	dispositionChan  chan bool
 	dispositionChans []chan<- bool
-	disposed         bool
-	callbacks        []func()
+
+	operationChan chan func() bool
 }
 
 func (d *disposable) Dispose() {
-	go func() {
-		select {
-		case <-d.canDisposeChan:
-		default:
+	d.operationChan <- func() bool {
+		d.disposed = true
+		for _, c := range d.dispositionChans {
+			go func(c chan<- bool) {
+				select {
+				case c <- true:
+				case <-time.After(1 * time.Second):
+				}
+			}(c)
 		}
-	}()
-}
-
-func (d *disposable) disposeImpl() {
-	d.canDisposeChan <- false
-	if d.disposed == true {
-		return
+		for _, callback := range d.callbacks {
+			callback()
+		}
+		d.callbacks = nil
+		d.dispositionChans = nil
+		d.operationChan = nil
+		return true
 	}
-	for _, c := range d.dispositionChans {
-		go func(c chan<- bool) {
-			select {
-			case c <- true:
-			case <-time.After(1 * time.Second):
-			}
-		}(c)
-	}
-	d.disposed = true
-	for _, callback := range d.callbacks {
-		callback()
-	}
-	d.callbacks = nil
-	d.dispositionChan = nil
-	d.dispositionChans = nil
-	d.canDisposeChan = nil
 }
 
 func (d *disposable) DispositionChan() <-chan bool {
@@ -56,7 +48,24 @@ func (d *disposable) DispositionChan() <-chan bool {
 }
 
 func (d *disposable) AddDispositionChan(c chan<- bool) {
-	d.dispositionChans = append(d.dispositionChans, c)
+	if d.operationChan == nil {
+		select {
+		case c <- true:
+		default:
+		}
+		return
+	}
+	d.operationChan <- func() bool {
+		if d.disposed {
+			select {
+			case c <- true:
+			default:
+			}
+		} else {
+			d.dispositionChans = append(d.dispositionChans, c)
+		}
+		return false
+	}
 }
 
 func (d *disposable) IsDisposed() bool {
@@ -64,22 +73,41 @@ func (d *disposable) IsDisposed() bool {
 }
 
 func (d *disposable) AddCallback(callback func()) {
-	d.callbacks = append(d.callbacks, callback)
+	if d.operationChan == nil {
+		callback()
+		return
+	}
+	d.operationChan <- func() bool {
+		if d.disposed {
+			callback()
+		} else {
+			d.callbacks = append(d.callbacks, callback)
+		}
+		return false
+	}
 }
 
 func NewDisposable(callback func()) Disposable {
-	dispositionChan := make(chan bool)
+	dispositionChan := make(chan bool, 1)
 	d := &disposable{
-		canDisposeChan:   make(chan bool, 1),
+		disposed:  false,
+		callbacks: make([]func(), 0, 1),
+
 		dispositionChan:  dispositionChan,
 		dispositionChans: []chan<- bool{dispositionChan},
-		disposed:         false,
-		callbacks:        make([]func(), 0, 1),
+
+		operationChan: make(chan func() bool, 10),
 	}
 	if callback != nil {
-		d.AddCallback(callback)
+		d.callbacks = append(d.callbacks, callback)
 	}
-	d.canDisposeChan <- true
-	go d.disposeImpl()
+	go func() {
+		for {
+			op := <-d.operationChan
+			if op() {
+				return
+			}
+		}
+	}()
 	return d
 }

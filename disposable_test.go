@@ -83,3 +83,60 @@ func TestAddDispositionChan(t *testing.T) {
 		t.Error("Expect chan1 disposition channel to trigger")
 	}
 }
+
+func TestMultipleDispositionChan(t *testing.T) {
+	d := NewDisposable(nil)
+	receivedChanDefault := false
+	receivedChan1 := false
+	receivedChan3 := false
+	chan1 := make(chan bool, 1)
+	chan2 := make(chan bool)
+	chan3 := make(chan bool)
+	doneChan := make(chan bool)
+	isExpectedResult := func() bool {
+		return receivedChanDefault && receivedChan1 && receivedChan3
+	}
+	go func() {
+		for {
+			select {
+			case <-d.DispositionChan():
+				t.Log("Received default disposition channel")
+				receivedChanDefault = true
+				if isExpectedResult() {
+					doneChan <- true
+					return
+				}
+			case <-chan1:
+				t.Log("Received chan1")
+				receivedChan1 = true
+				if isExpectedResult() {
+					doneChan <- true
+					return
+				}
+			case <-chan3:
+				t.Log("Received chan3")
+				receivedChan3 = true
+				if isExpectedResult() {
+					doneChan <- true
+					return
+				}
+			case <-time.After(1 * time.Second):
+				t.Log("Timeout!")
+				doneChan <- true
+				return
+			}
+		}
+	}()
+	// TODO there is a race somewhere!!!
+	d.AddDispositionChan(chan1)
+	d.AddDispositionChan(chan2)
+	d.Dispose()
+	d.AddDispositionChan(chan3)
+	<-doneChan
+	if !d.IsDisposed() {
+		t.Error("Expect disposable to dispose")
+	}
+	if !isExpectedResult() {
+		t.Error("Expect multiple disposition channels to be signaled properly")
+	}
+}

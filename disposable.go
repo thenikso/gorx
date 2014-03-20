@@ -119,8 +119,8 @@ func NewDisposable(callback func()) Disposable {
 				for {
 					select {
 					case op = <-d.operationChan:
-						disp = <-d.disposed
-						op(disp)
+						<-d.disposed
+						op(true)
 						d.disposed <- true
 					default:
 						return

@@ -127,7 +127,6 @@ func TestMultipleDispositionChan(t *testing.T) {
 			}
 		}
 	}()
-	// TODO there is a race somewhere!!!
 	d.AddDispositionChan(chan1)
 	d.AddDispositionChan(chan2)
 	d.Dispose()

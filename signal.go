@@ -84,7 +84,9 @@ func (s *signal) Subscribe(params ...interface{}) <-chan bool {
 	}
 
 	if extDisposable != nil {
-		extDisposable.AddCallback(subscriber.Disposable().Dispose)
+		extDisposable.AddCallback(func() {
+			subscriber.Disposable().Dispose()
+		})
 	}
 
 	go s.didSubscribe(subscriber)

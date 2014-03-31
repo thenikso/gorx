@@ -5,137 +5,101 @@ import (
 	"time"
 )
 
-func TestItShouldDisposeAsyncronously(t *testing.T) {
-	d := NewDisposable(nil)
-	if d.IsDisposed() == true {
-		t.Error("Expect Disposable not to be disposed")
-	}
-	d.Dispose()
-	if d.IsDisposed() == true {
-		t.Error("Expect Disposable not to be disposed before DispositionChan triggers")
-	}
-	<-d.DispositionChan()
-	if d.IsDisposed() == false {
-		t.Error("Expect Disposable to be disposed")
+func processChan(testChan <-chan int, process func(int)) {
+	for {
+		select {
+		case d := <-testChan:
+			process(d)
+		default:
+			return
+		}
 	}
 }
 
-func TestItShouldCallCallback(t *testing.T) {
-	callbackCalled := 0
-	d := NewDisposable(func() {
-		callbackCalled += 1
+func countChan(testChan <-chan int) int {
+	res := 0
+	processChan(testChan, func(int) {
+		res += 1
 	})
-	d.Dispose()
-	<-d.DispositionChan()
-	if callbackCalled != 1 {
+	return res
+}
+
+func chanToSlice(testChan <-chan int) []int {
+	res := []int{}
+	processChan(testChan, func(i int) {
+		res = append(res, i)
+	})
+	return res
+}
+
+func TestItShouldCallCallback(t *testing.T) {
+	testChan := make(chan int, 2)
+	d := NewDisposable(func() {
+		testChan <- 1
+	})
+	<-d.Dispose()
+	if countChan(testChan) != 1 {
 		t.Error("Expect callback to be called on disposal")
 	}
 }
 
 func TestItShouldCallMultipleCallbacks(t *testing.T) {
-	calledCallbacks := []int{}
+	testChan := make(chan int, 2)
 	d := NewDisposable(func() {
-		calledCallbacks = append(calledCallbacks, 1)
+		testChan <- 1
 	})
 	d.AddCallback(func() {
-		calledCallbacks = append(calledCallbacks, 2)
+		testChan <- 2
 	})
-	d.Dispose()
-	<-d.DispositionChan()
+	<-d.Dispose()
+	calledCallbacks := chanToSlice(testChan)
 	if len(calledCallbacks) != 2 || calledCallbacks[0] != 1 || calledCallbacks[1] != 2 {
 		t.Errorf("Expect all callbacks to have be called on disposal, got: %v", calledCallbacks)
 	}
 }
 
-func TestAddDispositionChan(t *testing.T) {
-	d := NewDisposable(nil)
-	chan1 := make(chan bool, 1)
-	doneChan := make(chan bool, 1)
-	receivedChanDefault := false
-	receivedChan1 := false
-	d.AddDispositionChan(chan1)
+func TestItShouldCallCallbacksOnlyOnce(t *testing.T) {
+	testChan := make(chan int, 2)
+	d := NewDisposable(func() {
+		testChan <- 1
+	})
 	d.Dispose()
-	func() {
-		for {
-			select {
-			case receivedChanDefault = <-d.DispositionChan():
-				if receivedChan1 {
-					doneChan <- true
-					return
-				}
-			case receivedChan1 = <-chan1:
-				if receivedChanDefault {
-					doneChan <- true
-					return
-				}
-			case <-time.After(1 * time.Second):
-				t.Log("Timeout!")
-				doneChan <- true
-				return
-			}
-		}
-	}()
-	<-doneChan
-	if !receivedChanDefault {
-		t.Error("Expect default disposition channel to trigger")
-	}
-	if !receivedChan1 {
-		t.Error("Expect chan1 disposition channel to trigger")
+	<-d.Dispose()
+	if countChan(testChan) != 1 {
+		t.Error("Expect callback to be called only once")
 	}
 }
 
-func TestMultipleDispositionChan(t *testing.T) {
+func TestItShouldAllowWaitingMultipleTimesOnDispositionChan(t *testing.T) {
+	testChan := make(chan int, 3)
 	d := NewDisposable(nil)
-	receivedChanDefault := false
-	receivedChan1 := false
-	receivedChan3 := false
-	chan1 := make(chan bool, 1)
-	chan2 := make(chan bool)
-	chan3 := make(chan bool)
-	doneChan := make(chan bool)
-	isExpectedResult := func() bool {
-		return receivedChanDefault && receivedChan1 && receivedChan3
-	}
 	go func() {
-		for {
-			select {
-			case <-d.DispositionChan():
-				t.Log("Received default disposition channel")
-				receivedChanDefault = true
-				if isExpectedResult() {
-					doneChan <- true
-					return
-				}
-			case <-chan1:
-				t.Log("Received chan1")
-				receivedChan1 = true
-				if isExpectedResult() {
-					doneChan <- true
-					return
-				}
-			case <-chan3:
-				t.Log("Received chan3")
-				receivedChan3 = true
-				if isExpectedResult() {
-					doneChan <- true
-					return
-				}
-			case <-time.After(1 * time.Second):
-				t.Log("Timeout!")
-				doneChan <- true
-				return
-			}
-		}
+		<-d.Dispose()
+		testChan <- 1
 	}()
-	d.AddDispositionChan(chan1)
-	d.AddDispositionChan(chan2)
-	d.Dispose()
-	d.AddDispositionChan(chan3)
-	<-doneChan
-	if !d.IsDisposed() {
-		t.Error("Expect disposable to dispose")
+	go func() {
+		<-d.DispositionChan()
+		testChan <- 1
+	}()
+	<-d.Dispose()
+	go func() {
+		<-d.DispositionChan()
+		testChan <- 1
+	}()
+	returnedFunc := 0
+	for {
+		select {
+		case <-testChan:
+			returnedFunc += 1
+			if returnedFunc == 3 {
+				goto end
+			}
+		case <-time.After(1 * time.Second):
+			goto end
+		}
 	}
-	if !isExpectedResult() {
-		t.Error("Expect multiple disposition channels to be signaled properly")
+end:
+	if returnedFunc != 3 {
+		t.Error("Expect disposable to signal all go routines")
 	}
 }

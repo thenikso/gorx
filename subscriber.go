@@ -70,7 +70,6 @@ func newSubscriber(next func(interface{}), err func(error), complete func()) *su
 		subscriber.disposable = nil
 		subscriber.dispChan = nil
 	})
-	subscriber.disposable.AddDispositionChan(subscriber.dispChan)
 	go func() {
 		for {
 			select {
@@ -82,6 +81,8 @@ func newSubscriber(next func(interface{}), err func(error), complete func()) *su
 				subscriber.compFunc()
 			case <-subscriber.dispChan:
 				subscriber.disposable.Dispose()
+				return
+			case <-subscriber.disposable.DispositionChan():
 				return
 			}
 		}

@@ -80,7 +80,7 @@ func (s *signal) Subscribe(params ...interface{}) <-chan bool {
 	}
 
 	if subscriber == nil {
-		subscriber = newSubscriber(nextFunc, errFunc, compFunc)
+		subscriber = NewSubscriber(nextFunc, errFunc, compFunc)
 	}
 
 	if extDisposable != nil {

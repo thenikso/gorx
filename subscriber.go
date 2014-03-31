@@ -10,78 +10,62 @@ type Subscriber interface {
 type subscriber struct {
 	Subscriber
 	nextFunc   func(interface{})
-	nextChan   chan interface{}
 	errFunc    func(error)
-	errChan    chan error
 	compFunc   func()
-	compChan   chan bool
 	disposable Disposable
-	dispChan   chan bool
+
+	operationChan chan func()
 }
 
 func (s *subscriber) SendNext(value interface{}) {
-	if s.nextChan == nil {
-		return
+	s.operationChan <- func() {
+		if s.nextFunc != nil {
+			s.nextFunc(value)
+		}
 	}
-	s.nextChan <- value
 }
 
 func (s *subscriber) SendError(err error) {
-	if s.errChan != nil {
-		s.errChan <- err
+	s.operationChan <- func() {
+		if s.errFunc != nil {
+			s.errFunc(err)
+		}
+		s.Disposable().Dispose()
 	}
-	s.dispChan <- false
 }
 
 func (s *subscriber) SendCompleted() {
-	if s.compChan != nil {
-		s.compChan <- true
+	s.operationChan <- func() {
+		if s.compFunc != nil {
+			s.compFunc()
+		}
+		s.Disposable().Dispose()
 	}
-	s.dispChan <- true
 }
 
 func (s *subscriber) Disposable() Disposable {
 	return s.disposable
 }
 
-func newSubscriber(next func(interface{}), err func(error), complete func()) *subscriber {
+func NewSubscriber(next func(interface{}), err func(error), complete func()) Subscriber {
 	var subscriber = &subscriber{
-		nextFunc: next,
-		errFunc:  err,
-		compFunc: complete,
-		dispChan: make(chan bool, 1),
-	}
-	if next != nil {
-		subscriber.nextChan = make(chan interface{})
-	}
-	if err != nil {
-		subscriber.errChan = make(chan error)
-	}
-	if complete != nil {
-		subscriber.compChan = make(chan bool)
+		nextFunc:      next,
+		errFunc:       err,
+		compFunc:      complete,
+		operationChan: make(chan func()),
 	}
 	subscriber.disposable = NewDisposable(func() {
 		subscriber.nextFunc = nil
-		subscriber.nextChan = nil
 		subscriber.errFunc = nil
-		subscriber.errChan = nil
 		subscriber.compFunc = nil
-		subscriber.compChan = nil
-		subscriber.disposable = nil
-		subscriber.dispChan = nil
+		close(subscriber.operationChan)
+		subscriber.operationChan = nil
 	})
 	go func() {
 		for {
 			select {
-			case v := <-subscriber.nextChan:
-				subscriber.nextFunc(v)
-			case e := <-subscriber.errChan:
-				subscriber.errFunc(e)
-			case <-subscriber.compChan:
-				subscriber.compFunc()
-			case <-subscriber.dispChan:
-				subscriber.disposable.Dispose()
-				return
+			case op := <-subscriber.operationChan:
+				op()
 			case <-subscriber.disposable.DispositionChan():
 				return
 			}

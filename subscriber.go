@@ -58,8 +58,6 @@ func NewSubscriber(next func(interface{}), err func(error), complete func()) Sub
 		subscriber.nextFunc = nil
 		subscriber.errFunc = nil
 		subscriber.compFunc = nil
-		close(subscriber.operationChan)
-		subscriber.operationChan = nil
 	})
 	go func() {
 		for {

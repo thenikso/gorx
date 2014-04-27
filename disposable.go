@@ -3,8 +3,8 @@ package rx
 import "time"
 
 type Disposable interface {
-	Dispose() <-chan bool
-	DispositionChan() <-chan bool
+	Dispose() <-chan struct{}
+	DispositionChan() <-chan struct{}
 	IsDisposed() bool
 	AddCallback(func())
 }
@@ -15,7 +15,7 @@ type disposable struct {
 	disposed  chan bool
 	callbacks []func()
 
-	dispositionChan chan bool
+	dispositionChan chan struct{}
 
 	operationChan chan func(bool) bool
 }
@@ -26,7 +26,7 @@ func (d *disposable) doWithDisposedState(f func(bool)) {
 	d.disposed <- disp
 }
 
-func (d *disposable) Dispose() <-chan bool {
+func (d *disposable) Dispose() <-chan struct{} {
 	d.doWithDisposedState(func(disposed bool) {
 		if disposed {
 			return
@@ -36,7 +36,7 @@ func (d *disposable) Dispose() <-chan bool {
 				return true
 			}
 			select {
-			case d.dispositionChan <- true:
+			case d.dispositionChan <- struct{}{}:
 			case <-time.After(1 * time.Second):
 			}
 			close(d.dispositionChan)
@@ -49,7 +49,7 @@ func (d *disposable) Dispose() <-chan bool {
 	return d.dispositionChan
 }
 
-func (d *disposable) DispositionChan() <-chan bool {
+func (d *disposable) DispositionChan() <-chan struct{} {
 	return d.dispositionChan
 }
 
@@ -79,7 +79,7 @@ func (d *disposable) AddCallback(callback func()) {
 }
 
 func NewDisposable(callback func()) Disposable {
-	dispositionChan := make(chan bool, 1)
+	dispositionChan := make(chan struct{}, 1)
 	d := &disposable{
 		disposed:  make(chan bool, 1),
 		callbacks: make([]func(), 0, 1),

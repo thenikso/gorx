@@ -9,7 +9,7 @@ import (
 type Signal interface {
 	// questo può avere tipo ...interface{} e con reflect vedere i tipi dei parametri
 	// un func(error) sarà per error, un func() per complete e un altro func(qualcosa) per next
-	Subscribe(...interface{}) <-chan bool
+	Subscribe(...interface{}) <-chan struct{}
 
 	Concat(Signal) Signal
 }
@@ -19,7 +19,7 @@ type signal struct {
 	didSubscribe func(Subscriber)
 }
 
-func (s *signal) Subscribe(params ...interface{}) <-chan bool {
+func (s *signal) Subscribe(params ...interface{}) <-chan struct{} {
 	var nextFunc func(interface{})
 	var errFunc func(error)
 	var compFunc func()
@@ -74,8 +74,8 @@ func (s *signal) Subscribe(params ...interface{}) <-chan bool {
 	}
 
 	if extDisposable != nil && extDisposable.IsDisposed() {
-		im := make(chan bool, 1)
-		im <- true
+		im := make(chan struct{}, 1)
+		im <- struct{}{}
 		return im
 	}
 

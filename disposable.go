@@ -117,6 +117,9 @@ func (disposable *compositeDisposable) AddDisposable(d Disposable) error {
 }
 
 func (disposable *compositeDisposable) AddDisposableFunc(action func() error) error {
+	if action == nil {
+		return nil
+	}
 	return disposable.AddDisposable(NewActionDisposable(action))
 }
 
@@ -132,7 +135,8 @@ func (disposable *compositeDisposable) PruneDisposed() {
 	disposable.mutex.Unlock()
 }
 
-func NewCompositeDisposable() CompositeDisposable {
+func NewCompositeDisposable(action func() error) CompositeDisposable {
 	disposable := &compositeDisposable{disposables: make([]Disposable, 0, 1)}
+	disposable.AddDisposableFunc(action)
 	return disposable
 }

@@ -40,7 +40,7 @@ func TestActionDisposableShouldRunActionUponDisposal(t *testing.T) {
 }
 
 func TestCompositeDisposableShouldDisposeAddedDisposables(t *testing.T) {
-	disposable := NewCompositeDisposable()
+	disposable := NewCompositeDisposable(nil)
 
 	simpleDisposable := NewSimpleDisposable()
 	disposable.AddDisposable(simpleDisposable)
@@ -75,7 +75,7 @@ func TestCompositeDisposableShouldDisposeAddedDisposables(t *testing.T) {
 }
 
 func TestCompositeDisposableShouldNotPruneActiveDisposables(t *testing.T) {
-	disposable := NewCompositeDisposable()
+	disposable := NewCompositeDisposable(nil)
 
 	simpleDisposable := NewSimpleDisposable()
 	disposable.AddDisposable(simpleDisposable)

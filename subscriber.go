@@ -1,73 +1,55 @@
 package rx
 
+// An Subscriber is a receiver of events from an Signal.
 type Subscriber interface {
-	SendNext(interface{})
-	SendError(error)
-	SendCompleted()
-	Disposable() Disposable
+	OnNext(interface{})
+	OnError(error)
+	OnCompleted()
+	Disposable() CompositeDisposable
 }
 
 type subscriber struct {
-	Subscriber
 	nextFunc   func(interface{})
 	errFunc    func(error)
 	compFunc   func()
-	disposable Disposable
-
-	operationChan chan func()
+	disposable CompositeDisposable
 }
 
-func (s *subscriber) SendNext(value interface{}) {
-	s.operationChan <- func() {
-		if s.nextFunc != nil {
-			s.nextFunc(value)
-		}
+func (o *subscriber) OnNext(value interface{}) {
+	if o.nextFunc != nil {
+		o.nextFunc(value)
 	}
 }
 
-func (s *subscriber) SendError(err error) {
-	s.operationChan <- func() {
-		if s.errFunc != nil {
-			s.errFunc(err)
-		}
-		s.Disposable().Dispose()
+func (o *subscriber) OnError(err error) {
+	if o.errFunc != nil {
+		o.errFunc(err)
 	}
+	o.disposable.Dispose()
 }
 
-func (s *subscriber) SendCompleted() {
-	s.operationChan <- func() {
-		if s.compFunc != nil {
-			s.compFunc()
-		}
-		s.Disposable().Dispose()
+func (o *subscriber) OnCompleted() {
+	if o.compFunc != nil {
+		o.compFunc()
 	}
+	o.disposable.Dispose()
 }
 
-func (s *subscriber) Disposable() Disposable {
-	return s.disposable
+func (o *subscriber) Disposable() CompositeDisposable {
+	return o.disposable
 }
 
-func NewSubscriber(next func(interface{}), err func(error), complete func()) Subscriber {
+func NewSubscriber(next func(interface{}), err func(error), completed func()) Subscriber {
 	var subscriber = &subscriber{
-		nextFunc:      next,
-		errFunc:       err,
-		compFunc:      complete,
-		operationChan: make(chan func()),
+		nextFunc: next,
+		errFunc:  err,
+		compFunc: completed,
 	}
-	subscriber.disposable = NewDisposable(func() {
+	subscriber.disposable = NewCompositeDisposable(func() error {
 		subscriber.nextFunc = nil
 		subscriber.errFunc = nil
 		subscriber.compFunc = nil
+		return nil
 	})
-	go func() {
-		for {
-			select {
-			case op := <-subscriber.operationChan:
-				op()
-			case <-subscriber.disposable.DispositionChan():
-				return
-			}
-		}
-	}()
 	return subscriber
 }

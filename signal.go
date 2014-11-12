@@ -7,23 +7,21 @@ import (
 )
 
 type Signal interface {
-	// questo può avere tipo ...interface{} e con reflect vedere i tipi dei parametri
-	// un func(error) sarà per error, un func() per complete e un altro func(qualcosa) per next
-	Subscribe(...interface{}) <-chan struct{}
-
-	Concat(Signal) Signal
+	Subscribe(...interface{}) Disposable
 }
 
 type signal struct {
-	Signal
 	didSubscribe func(Subscriber)
 }
 
-func (s *signal) Subscribe(params ...interface{}) <-chan struct{} {
+// Starts producing events for the given subscriber.
+//
+// Returns a Disposable which will cancel the work associated with event
+// production, and prevent any further events from being sent.
+func (s *signal) Subscribe(params ...interface{}) Disposable {
 	var nextFunc func(interface{})
 	var errFunc func(error)
 	var compFunc func()
-	var extDisposable Disposable
 	var subscriber Subscriber
 	for _, p := range params {
 		switch p.(type) {
@@ -42,11 +40,6 @@ func (s *signal) Subscribe(params ...interface{}) <-chan struct{} {
 				panic("'Next' function already defined")
 			}
 			nextFunc = p.(func(interface{}))
-		case Disposable:
-			if extDisposable != nil {
-				panic("Disposable already defined")
-			}
-			extDisposable = p.(Disposable)
 		case Subscriber:
 			if subscriber != nil {
 				panic("Subscriber already defined")
@@ -73,39 +66,57 @@ func (s *signal) Subscribe(params ...interface{}) <-chan struct{} {
 		}
 	}
 
-	if extDisposable != nil && extDisposable.IsDisposed() {
-		im := make(chan struct{}, 1)
-		im <- struct{}{}
-		return im
-	}
-
 	if subscriber == nil {
 		subscriber = NewSubscriber(nextFunc, errFunc, compFunc)
 	}
 
-	if extDisposable != nil {
-		extDisposable.AddCallback(func() {
-			subscriber.Disposable().Dispose()
-		})
-	}
+	s.didSubscribe(subscriber)
 
-	go s.didSubscribe(subscriber)
-
-	return subscriber.Disposable().DispositionChan()
+	return subscriber.Disposable()
 }
 
+// Creates a signal that will execute the given action upon subscription,
+// then forward all events from the generated signal.
 func NewSignal(didSubscribe func(subscriber Subscriber)) Signal {
 	return &signal{didSubscribe: didSubscribe}
 }
 
-func (s *signal) Concat(signal Signal) Signal {
-	return NewSignal(func(sub Subscriber) {
-		s.Subscribe(func(v interface{}) {
-			sub.SendNext(v)
-		}, func(err error) {
-			sub.SendError(err)
-		}, func() {
-			signal.Subscribe(sub)
-		}, sub.Disposable())
-	})
+// Creates a signal that will immediately complete.
+func NewEmptySignal() Signal {
+	return &signal{func(subscriber Subscriber) {
+		subscriber.OnCompleted()
+	}}
+}
+
+// Creates a signal that will immediately yield a single value then
+// complete.
+func NewSingleSignal(value interface{}) Signal {
+	return &signal{func(subscriber Subscriber) {
+		subscriber.OnNext(value)
+		subscriber.OnCompleted()
+	}}
+}
+
+// Creates a signal that will immediately generate an error.
+func NewErrorSignal(err error) Signal {
+	return &signal{func(subscriber Subscriber) {
+		subscriber.OnError(err)
+	}}
+}
+
+// Creates a signal that will never send any events.
+func NewNeverSignal() Signal {
+	return &signal{func(_ Subscriber) {
+	}}
+}
+
+// Creates a signal that will iterate over the given sequence whenever a
+// Subscriber is attached.
+func NewValuesSignal(values []interface{}) Signal {
+	return &signal{func(subscriber Subscriber) {
+		for _, v := range values {
+			subscriber.OnNext(v)
+		}
+		subscriber.OnCompleted()
+	}}
 }

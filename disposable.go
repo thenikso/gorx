@@ -1,116 +1,138 @@
 package rx
 
-import "time"
+import (
+	"sync"
+	"sync/atomic"
+)
 
+// Represents something that can be “disposed”, usually associated with freeing
+// resources or canceling work.
 type Disposable interface {
-	Dispose() <-chan struct{}
-	DispositionChan() <-chan struct{}
+	Dispose() error
 	IsDisposed() bool
-	AddCallback(func())
 }
 
-type disposable struct {
+// A disposable that only flips `disposed` upon disposal, and performs no other
+// work.
+type simpleDisposable struct {
+	disposed uint32
+}
+
+func (disposable *simpleDisposable) IsDisposed() bool {
+	val := atomic.LoadUint32(&disposable.disposed)
+	return val == 1
+}
+
+func (disposable *simpleDisposable) Dispose() error {
+	atomic.StoreUint32(&disposable.disposed, 1)
+	return nil
+}
+
+func NewSimpleDisposable() Disposable {
+	disposable := &simpleDisposable{disposed: 0}
+	return disposable
+}
+
+// A disposable that will run an action upon disposal.
+type actionDisposable struct {
+	action func() error
+	mutex  sync.Mutex
+}
+
+func (disposable *actionDisposable) IsDisposed() bool {
+	disposable.mutex.Lock()
+	disposed := disposable.action == nil
+	disposable.mutex.Unlock()
+	return disposed
+}
+
+func (disposable *actionDisposable) Dispose() error {
+	disposable.mutex.Lock()
+	var err error
+	if disposable.action != nil {
+		err = disposable.action()
+	} else {
+		err = nil
+	}
+	disposable.action = nil
+	disposable.mutex.Unlock()
+	return err
+}
+
+func NewActionDisposable(action func() error) Disposable {
+	disposable := &actionDisposable{action: action}
+	return disposable
+}
+
+// A disposable that will dispose of any number of other disposables.
+type CompositeDisposable interface {
 	Disposable
-
-	disposed  chan bool
-	callbacks []func()
-
-	dispositionChan chan struct{}
-
-	operationChan chan func(bool) bool
+	AddDisposable(Disposable) error
+	AddDisposableFunc(func() error) error
+	PruneDisposed()
 }
 
-func (d *disposable) doWithDisposedState(f func(bool)) {
-	disp := <-d.disposed
-	f(disp)
-	d.disposed <- disp
+type compositeDisposable struct {
+	disposables []Disposable
+	mutex       sync.Mutex
 }
 
-func (d *disposable) Dispose() <-chan struct{} {
-	d.doWithDisposedState(func(disposed bool) {
-		if disposed {
-			return
-		}
-		d.operationChan <- func(disposed bool) bool {
-			if disposed {
-				return true
-			}
-			select {
-			case d.dispositionChan <- struct{}{}:
-			case <-time.After(1 * time.Second):
-			}
-			close(d.dispositionChan)
-			for _, callback := range d.callbacks {
-				callback()
-			}
-			return true
-		}
-	})
-	return d.dispositionChan
+func (disposable *compositeDisposable) IsDisposed() bool {
+	disposable.mutex.Lock()
+	disposed := disposable.disposables == nil
+	disposable.mutex.Unlock()
+	return disposed
 }
 
-func (d *disposable) DispositionChan() <-chan struct{} {
-	return d.dispositionChan
-}
-
-func (d *disposable) IsDisposed() bool {
-	var disp bool
-	d.doWithDisposedState(func(disposed bool) {
-		disp = disposed
-	})
-	return disp
-}
-
-func (d *disposable) AddCallback(callback func()) {
-	d.doWithDisposedState(func(disposed bool) {
-		if disposed {
-			callback()
-			return
-		}
-		d.operationChan <- func(disposed bool) bool {
-			if disposed {
-				callback()
-			} else {
-				d.callbacks = append(d.callbacks, callback)
-			}
-			return false
-		}
-	})
-}
-
-func NewDisposable(callback func()) Disposable {
-	dispositionChan := make(chan struct{}, 1)
-	d := &disposable{
-		disposed:  make(chan bool, 1),
-		callbacks: make([]func(), 0, 1),
-
-		dispositionChan: dispositionChan,
-
-		operationChan: make(chan func(bool) bool, 10),
+func (disposable *compositeDisposable) Dispose() error {
+	disposable.mutex.Lock()
+	var err error
+	for _, d := range disposable.disposables {
+		err = d.Dispose()
 	}
-	if callback != nil {
-		d.callbacks = append(d.callbacks, callback)
+	disposable.disposables = nil
+	disposable.mutex.Unlock()
+	return err
+}
+
+func (disposable *compositeDisposable) AddDisposable(d Disposable) error {
+	if d == nil {
+		return nil
 	}
-	d.disposed <- false
-	go func() {
-		for {
-			op := <-d.operationChan
-			disp := <-d.disposed
-			if op(disp) {
-				d.disposed <- true
-				for {
-					select {
-					case op = <-d.operationChan:
-						<-d.disposed
-						op(true)
-						d.disposed <- true
-					default:
-						return
-					}
-				}
-			}
-			d.disposed <- false
+
+	shouldDispose := false
+	disposable.mutex.Lock()
+	if disposable.disposables != nil {
+		disposable.disposables = append(disposable.disposables, d)
+	} else {
+		shouldDispose = true
+	}
+	disposable.mutex.Unlock()
+
+	if shouldDispose == true {
+		return d.Dispose()
+	}
+
+	return nil
+}
+
+func (disposable *compositeDisposable) AddDisposableFunc(action func() error) error {
+	return disposable.AddDisposable(NewActionDisposable(action))
+}
+
+func (disposable *compositeDisposable) PruneDisposed() {
+	disposable.mutex.Lock()
+	filteredDisposables := make([]Disposable, 0, len(disposable.disposables))
+	for _, d := range disposable.disposables {
+		if d.IsDisposed() == false {
+			filteredDisposables = append(filteredDisposables, d)
 		}
-	}()
-	return d
+	}
+	disposable.disposables = filteredDisposables
+	disposable.mutex.Unlock()
+}
+
+func NewCompositeDisposable() CompositeDisposable {
+	disposable := &compositeDisposable{disposables: make([]Disposable, 0, 1)}
+	return disposable
 }

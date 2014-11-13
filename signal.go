@@ -130,26 +130,11 @@ func (signal *signal) MapI(f func(interface{}) interface{}) Signal {
 	})
 }
 func (signal *signal) Map(p interface{}) Signal {
-	// if len(params) != 1 {
-	// 	panicf("Signal.Map: Invalid number of parameters %v, expecting 1", len(params))
-	// }
-	// p := params[0]
-	funcT := reflect.TypeOf(p)
-	if funcT.Kind() != reflect.Func || funcT.NumIn() != 1 || funcT.NumOut() != 1 {
-		panic("Signal.Map: Invalid argument, expecting func(A) B")
+	mapFunc, err := castFunc(p, (func(interface{}) interface{})(nil))
+	if err != nil {
+		panic(err)
 	}
-	funcV := reflect.ValueOf(p)
-	argT := funcT.In(0)
-	mapFunc := func(v interface{}) interface{} {
-		vV := reflect.ValueOf(v)
-		if vV.Type().AssignableTo(argT) {
-			retV := funcV.Call([]reflect.Value{vV})
-			return retV[0].Interface()
-		} else {
-			panic(fmt.Sprintf("Signal.Map: Expcting type %v got %v", argT.Name(), vV.Type().Name()))
-		}
-	}
-	return signal.MapI(mapFunc)
+	return signal.MapI(mapFunc.(func(interface{}) interface{}))
 }
 
 // Creates a signal that will execute the given action upon subscription,
@@ -196,4 +181,47 @@ func NewValuesSignal(values []interface{}) Signal {
 		}
 		subscriber.OnCompleted()
 	}}
+}
+
+// Utility function to convert a function signature.
+// The number of inputs and outputs between the input function and the desired
+// signature must be the same.
+// If the usual Go conversion rules do not allow conversion of inputs and outputs,
+// castFunc panics.
+// Typical usage (without error management):
+//     f, _ := castFunc(aFunc, (func(interface{}) interface{})(nil))
+//     f.(func(interface{}) interface{})(param)
+func castFunc(p interface{}, to interface{}) (interface{}, error) {
+	toT := reflect.TypeOf(to)
+	pT := reflect.TypeOf(p)
+	if pT.Kind() != reflect.Func {
+		return nil, errors.New(fmt.Sprintf("Invalid parameter kind (%v) expecting function", pT.Kind()))
+	}
+	if pT.Kind() != toT.Kind() {
+		return nil, errors.New(fmt.Sprintf("Invalid parameter kind (%v) expecting %v", pT.Kind(), toT.Kind()))
+	}
+	if pT.NumIn() != toT.NumIn() {
+		return nil, errors.New(fmt.Sprintf("Invalid parameter inputs number (%v) expecting %v", pT.NumIn(), toT.NumIn()))
+	}
+	if pT.NumOut() != toT.NumOut() {
+		return nil, errors.New(fmt.Sprintf("Invalid parameter outputs number (%v) expecting %v", pT.NumOut(), toT.NumOut()))
+	}
+	for i := 0; i < pT.NumIn(); i++ {
+		if pT.In(i).AssignableTo(toT.In(i)) == false {
+			return nil, errors.New(fmt.Sprintf("Invalid function %v input (%v) not assignable as %v", i, pT.In(i), toT.In(i)))
+		}
+	}
+	funcValue := reflect.MakeFunc(toT, func(args []reflect.Value) []reflect.Value {
+		properArgs := make([]reflect.Value, 0, len(args))
+		for _, a := range args {
+			properArgs = append(properArgs, reflect.ValueOf(a.Interface()))
+		}
+		results := reflect.ValueOf(p).Call(properArgs)
+		properResults := make([]reflect.Value, 0, len(results))
+		for i, a := range results {
+			properResults = append(properResults, a.Convert(toT.Out(i)))
+		}
+		return properResults
+	})
+	return funcValue.Interface(), nil
 }

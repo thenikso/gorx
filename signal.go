@@ -4,10 +4,14 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"sync"
 )
 
 type Signal interface {
 	Subscribe(...interface{}) Disposable
+
+	MapI(func(interface{}) interface{}) Signal
+	Map(interface{}) Signal
 }
 
 type signal struct {
@@ -73,6 +77,79 @@ func (s *signal) Subscribe(params ...interface{}) Disposable {
 	s.didSubscribe(subscriber)
 
 	return subscriber.Disposable()
+}
+
+// Maps over the elements of the signal, accumulating a state along the
+// way.
+//
+// This is meant as a primitive operator from which more complex operators
+// can be built.
+//
+// Yielding a `nil` state at any point will stop evaluation of the original
+// signal, and dispose of it.
+//
+// Returns a signal of the mapped values.
+func (s *signal) mapAccumulate(initialState interface{}, f func(state interface{}, current interface{}) (newState interface{}, newValue interface{})) Signal {
+	return NewSignal(func(subscriber Subscriber) {
+		var mutex sync.Mutex
+		state := initialState
+		disposable := s.Subscribe(
+			// Next
+			func(value interface{}) {
+				mutex.Lock()
+				st := state
+				mutex.Unlock()
+				newState, newValue := f(st, value)
+				subscriber.OnNext(newValue)
+
+				if newState != nil {
+					mutex.Lock()
+					state = newState
+					mutex.Unlock()
+				} else {
+					subscriber.OnCompleted()
+				}
+			},
+			// Error
+			func(err error) {
+				subscriber.OnError(err)
+			},
+			// Completed
+			func() {
+				subscriber.OnCompleted()
+			},
+		)
+		subscriber.Disposable().AddDisposable(disposable)
+	})
+}
+
+// Maps each value in the stream to a new value.
+func (signal *signal) MapI(f func(interface{}) interface{}) Signal {
+	return signal.mapAccumulate(struct{}{}, func(_, value interface{}) (interface{}, interface{}) {
+		return struct{}{}, f(value)
+	})
+}
+func (signal *signal) Map(p interface{}) Signal {
+	// if len(params) != 1 {
+	// 	panicf("Signal.Map: Invalid number of parameters %v, expecting 1", len(params))
+	// }
+	// p := params[0]
+	funcT := reflect.TypeOf(p)
+	if funcT.Kind() != reflect.Func || funcT.NumIn() != 1 || funcT.NumOut() != 1 {
+		panic("Signal.Map: Invalid argument, expecting func(A) B")
+	}
+	funcV := reflect.ValueOf(p)
+	argT := funcT.In(0)
+	mapFunc := func(v interface{}) interface{} {
+		vV := reflect.ValueOf(v)
+		if vV.Type().AssignableTo(argT) {
+			retV := funcV.Call([]reflect.Value{vV})
+			return retV[0].Interface()
+		} else {
+			panic(fmt.Sprintf("Signal.Map: Expcting type %v got %v", argT.Name(), vV.Type().Name()))
+		}
+	}
+	return signal.MapI(mapFunc)
 }
 
 // Creates a signal that will execute the given action upon subscription,

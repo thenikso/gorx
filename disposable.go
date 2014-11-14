@@ -1,10 +1,5 @@
 package rx
 
-import (
-	"sync"
-	"sync/atomic"
-)
-
 // Represents something that can be “disposed”, usually associated with freeing
 // resources or canceling work.
 type Disposable interface {
@@ -15,52 +10,43 @@ type Disposable interface {
 // A disposable that only flips `disposed` upon disposal, and performs no other
 // work.
 type simpleDisposable struct {
-	disposed uint32
+	disposed Atomic
 }
 
 func (disposable *simpleDisposable) IsDisposed() bool {
-	val := atomic.LoadUint32(&disposable.disposed)
-	return val == 1
+	return disposable.disposed.Value().(bool)
 }
 
 func (disposable *simpleDisposable) Dispose() error {
-	atomic.StoreUint32(&disposable.disposed, 1)
+	disposable.disposed.SetValue(true)
 	return nil
 }
 
 func NewSimpleDisposable() Disposable {
-	disposable := &simpleDisposable{disposed: 0}
+	disposable := &simpleDisposable{disposed: NewAtomic(false)}
 	return disposable
 }
 
 // A disposable that will run an action upon disposal.
 type actionDisposable struct {
-	action func() error
-	mutex  sync.Mutex
+	action Atomic
 }
 
 func (disposable *actionDisposable) IsDisposed() bool {
-	disposable.mutex.Lock()
-	disposed := disposable.action == nil
-	disposable.mutex.Unlock()
-	return disposed
+	return disposable.action.Value() == nil
 }
 
 func (disposable *actionDisposable) Dispose() error {
-	disposable.mutex.Lock()
+	oldAction := disposable.action.Swap(nil)
 	var err error
-	if disposable.action != nil {
-		err = disposable.action()
-	} else {
-		err = nil
+	if oldAction != nil {
+		err = oldAction.(func() error)()
 	}
-	disposable.action = nil
-	disposable.mutex.Unlock()
 	return err
 }
 
 func NewActionDisposable(action func() error) Disposable {
-	disposable := &actionDisposable{action: action}
+	disposable := &actionDisposable{action: NewAtomic(action)}
 	return disposable
 }
 
@@ -73,25 +59,21 @@ type CompositeDisposable interface {
 }
 
 type compositeDisposable struct {
-	disposables []Disposable
-	mutex       sync.Mutex
+	disposables Atomic
 }
 
 func (disposable *compositeDisposable) IsDisposed() bool {
-	disposable.mutex.Lock()
-	disposed := disposable.disposables == nil
-	disposable.mutex.Unlock()
-	return disposed
+	return disposable.disposables.Value() == nil
 }
 
 func (disposable *compositeDisposable) Dispose() error {
-	disposable.mutex.Lock()
+	ds := disposable.disposables.Swap(nil)
 	var err error
-	for _, d := range disposable.disposables {
-		err = d.Dispose()
+	if ds != nil {
+		for _, d := range ds.([]Disposable) {
+			err = d.Dispose()
+		}
 	}
-	disposable.disposables = nil
-	disposable.mutex.Unlock()
 	return err
 }
 
@@ -100,14 +82,13 @@ func (disposable *compositeDisposable) AddDisposable(d Disposable) error {
 		return nil
 	}
 
-	shouldDispose := false
-	disposable.mutex.Lock()
-	if disposable.disposables != nil {
-		disposable.disposables = append(disposable.disposables, d)
-	} else {
-		shouldDispose = true
-	}
-	disposable.mutex.Unlock()
+	_, shouldDispose := disposable.disposables.ModifyData(func(ds interface{}) (interface{}, interface{}) {
+		if ds != nil {
+			return append(ds.([]Disposable), d), false
+		} else {
+			return nil, true
+		}
+	})
 
 	if shouldDispose == true {
 		return d.Dispose()
@@ -124,19 +105,19 @@ func (disposable *compositeDisposable) AddDisposableFunc(action func() error) er
 }
 
 func (disposable *compositeDisposable) PruneDisposed() {
-	disposable.mutex.Lock()
-	filteredDisposables := make([]Disposable, 0, len(disposable.disposables))
-	for _, d := range disposable.disposables {
-		if d.IsDisposed() == false {
-			filteredDisposables = append(filteredDisposables, d)
+	disposable.disposables.Modify(func(ds interface{}) interface{} {
+		filteredDisposables := make([]Disposable, 0, len(ds.([]Disposable)))
+		for _, d := range ds.([]Disposable) {
+			if d.IsDisposed() == false {
+				filteredDisposables = append(filteredDisposables, d)
+			}
 		}
-	}
-	disposable.disposables = filteredDisposables
-	disposable.mutex.Unlock()
+		return filteredDisposables
+	})
 }
 
 func NewCompositeDisposable(action func() error) CompositeDisposable {
-	disposable := &compositeDisposable{disposables: make([]Disposable, 0, 1)}
+	disposable := &compositeDisposable{disposables: NewAtomic(make([]Disposable, 0, 1))}
 	disposable.AddDisposableFunc(action)
 	return disposable
 }

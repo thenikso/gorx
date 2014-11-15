@@ -7,10 +7,12 @@ import (
 )
 
 type Signal interface {
-	Subscribe(...interface{}) Disposable
+	Subscribe(Subscriber) Disposable
+	SubscribeFunc(func(interface{}), func(error), func()) Disposable
+	SubscribeAuto(...interface{}) Disposable
 
-	MapI(func(interface{}) interface{}) Signal
-	Map(interface{}) Signal
+	Map(func(interface{}) interface{}) Signal
+	MapAuto(interface{}) Signal
 }
 
 type signal struct {
@@ -21,7 +23,16 @@ type signal struct {
 //
 // Returns a Disposable which will cancel the work associated with event
 // production, and prevent any further events from being sent.
-func (s *signal) Subscribe(params ...interface{}) Disposable {
+func (signal *signal) Subscribe(subscriber Subscriber) Disposable {
+	signal.didSubscribe(subscriber)
+	return subscriber.Disposable()
+}
+
+func (signal *signal) SubscribeFunc(next func(interface{}), err func(error), completed func()) Disposable {
+	return signal.Subscribe(NewSubscriber(next, err, completed))
+}
+
+func (signal *signal) SubscribeAuto(params ...interface{}) Disposable {
 	var nextFunc func(interface{})
 	var errFunc func(error)
 	var compFunc func()
@@ -73,9 +84,7 @@ func (s *signal) Subscribe(params ...interface{}) Disposable {
 		subscriber = NewSubscriber(nextFunc, errFunc, compFunc)
 	}
 
-	s.didSubscribe(subscriber)
-
-	return subscriber.Disposable()
+	return signal.Subscribe(subscriber)
 }
 
 // Maps over the elements of the signal, accumulating a state along the
@@ -91,7 +100,7 @@ func (s *signal) Subscribe(params ...interface{}) Disposable {
 func (s *signal) mapAccumulate(initialState interface{}, f func(state interface{}, current interface{}) (newState interface{}, newValue interface{})) Signal {
 	return NewSignal(func(subscriber Subscriber) {
 		state := NewAtomic(initialState)
-		disposable := s.Subscribe(
+		disposable := s.SubscribeFunc(
 			// Next
 			func(value interface{}) {
 				newState, newValue := f(state.Value(), value)
@@ -117,17 +126,17 @@ func (s *signal) mapAccumulate(initialState interface{}, f func(state interface{
 }
 
 // Maps each value in the stream to a new value.
-func (signal *signal) MapI(f func(interface{}) interface{}) Signal {
+func (signal *signal) Map(f func(interface{}) interface{}) Signal {
 	return signal.mapAccumulate(struct{}{}, func(_, value interface{}) (interface{}, interface{}) {
 		return struct{}{}, f(value)
 	})
 }
-func (signal *signal) Map(p interface{}) Signal {
+func (signal *signal) MapAuto(p interface{}) Signal {
 	mapFunc, err := castFunc(p, (func(interface{}) interface{})(nil))
 	if err != nil {
 		panic(err)
 	}
-	return signal.MapI(mapFunc.(func(interface{}) interface{}))
+	return signal.Map(mapFunc.(func(interface{}) interface{}))
 }
 
 // Merges a signal of signals down into a single signal, biased toward the
@@ -138,11 +147,18 @@ func (signal *signal) Map(p interface{}) Signal {
 // func (signal *signal) Merge() Signal {
 // 	return NewSignal(func(subscriber Subscriber) Disposable {
 // 		disposable := NewCompositeDisposable(nil)
-// 		var inFlight int32 = 1
+// 		inFlight := NewAtomic(1)
 
 // 		decrementInFlight := func() {
-
+// 			orig = inFlight.Modify(func(v interface{}) interface{} {
+// 				return v.(int) - 1
+// 			})
+// 			if orig == 1 {
+// 				subscriber.OnCompleted()
+// 			}
 // 		}
+
+// 		// selfDisposable := signal.Subscribe(...)
 // 	})
 // }
 

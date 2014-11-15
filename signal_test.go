@@ -7,9 +7,9 @@ import (
 func TestMapShouldMapInput(t *testing.T) {
 	signal := NewValuesSignal([]interface{}{1, 2, 3})
 	result := make([]int, 0)
-	signal.Map(func(v int) int {
+	signal.MapAuto(func(v int) int {
 		return v + 1
-	}).Subscribe(func(v int) {
+	}).SubscribeAuto(func(v int) {
 		result = append(result, v)
 	})
 	if len(result) != 3 {

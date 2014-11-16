@@ -46,6 +46,27 @@ func TestFilterShouldFilterSignal(t *testing.T) {
 	}
 }
 
+func TestScan(t *testing.T) {
+	signal := NewValuesSignal([]interface{}{1, 2, 3, 4, 5, 6})
+	result := make([]int, 0)
+	expected := []int{101, 103, 106, 110, 115, 121}
+
+	signal.ScanAuto(100, func(state int, current int) int {
+		return state + current
+	}).SubscribeAuto(func(v int) {
+		result = append(result, v)
+	})
+
+	if len(result) != len(expected) {
+		t.Fatalf("Expecting `len(result)` to equal %v got %v", len(expected), len(result))
+	}
+	for i, v := range expected {
+		if v != result[i] {
+			t.Fatalf("Expecting %v to equal %v", result, expected)
+		}
+	}
+}
+
 func TestMergeShouldMergeSignals(t *testing.T) {
 	signal := NewValuesSignal([]interface{}{
 		NewValuesSignal([]interface{}{1, 2}),

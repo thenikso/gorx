@@ -26,6 +26,9 @@ type Signal interface {
 	Filter(func(T) bool) Signal
 	FilterAuto(interface{}) Signal
 
+	Scan(U, func(U, T) U) Signal
+	ScanAuto(U, interface{}) Signal
+
 	Merge() Signal
 }
 
@@ -179,6 +182,23 @@ func (signal *signal) FilterAuto(p interface{}) Signal {
 		panic(err)
 	}
 	return signal.Filter(predicateFunc.(func(T) bool))
+}
+
+// Combines all the values in the stream, forwarding the result of each
+// intermediate combination step.
+func (signal *signal) Scan(initial U, f func(U, T) U) Signal {
+	return signal.mapAccumulate(initial.(interface{}), func(previous interface{}, current T) (interface{}, U) {
+		mapped := f(previous, current)
+		return mapped, mapped
+	})
+}
+
+func (signal *signal) ScanAuto(initial U, p interface{}) Signal {
+	f, err := castFunc(p, (func(U, T) U)(nil))
+	if err != nil {
+		panic(err)
+	}
+	return signal.Scan(initial, f.(func(U, T) U))
 }
 
 // Merges a signal of signals down into a single signal, biased toward the

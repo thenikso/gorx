@@ -35,7 +35,6 @@ func TestMergeShouldMergeSignals(t *testing.T) {
 	expected := []int{1, 2, 3, 4, 5, 6}
 
 	signal.Merge().SubscribeAuto(func(v int) {
-		t.Logf("v:", v)
 		result = append(result, v)
 	})
 

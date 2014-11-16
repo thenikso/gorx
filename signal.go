@@ -6,6 +6,12 @@ import (
 	"reflect"
 )
 
+// A stream that will begin generating events when a Subscriber is attached,
+// possibly performing some side effects in the process. Events are pushed to
+// the subscriber as they are generated.
+//
+// A corollary to this is that different Subscribers may see a different timing
+// of events, or even a different version of events altogether.
 type Signal interface {
 	Subscribe(Subscriber) Disposable
 	SubscribeFunc(func(interface{}), func(error), func()) Disposable
@@ -19,6 +25,52 @@ type Signal interface {
 
 type signal struct {
 	didSubscribe func(Subscriber)
+}
+
+// Creates a signal that will execute the given action upon subscription,
+// then forward all events from the generated signal.
+func NewSignal(didSubscribe func(subscriber Subscriber)) Signal {
+	return &signal{didSubscribe: didSubscribe}
+}
+
+// Creates a signal that will immediately complete.
+func NewEmptySignal() Signal {
+	return &signal{func(subscriber Subscriber) {
+		subscriber.OnCompleted()
+	}}
+}
+
+// Creates a signal that will immediately yield a single value then
+// complete.
+func NewSingleSignal(value interface{}) Signal {
+	return &signal{func(subscriber Subscriber) {
+		subscriber.OnNext(value)
+		subscriber.OnCompleted()
+	}}
+}
+
+// Creates a signal that will immediately generate an error.
+func NewErrorSignal(err error) Signal {
+	return &signal{func(subscriber Subscriber) {
+		subscriber.OnError(err)
+	}}
+}
+
+// Creates a signal that will never send any events.
+func NewNeverSignal() Signal {
+	return &signal{func(_ Subscriber) {
+	}}
+}
+
+// Creates a signal that will iterate over the given sequence whenever a
+// Subscriber is attached.
+func NewValuesSignal(values []interface{}) Signal {
+	return &signal{func(subscriber Subscriber) {
+		for _, v := range values {
+			subscriber.OnNext(v)
+		}
+		subscriber.OnCompleted()
+	}}
 }
 
 // Starts producing events for the given subscriber.
@@ -195,52 +247,6 @@ func (signal *signal) Merge() Signal {
 
 		subscriber.Disposable().AddDisposable(selfDisposable)
 	})
-}
-
-// Creates a signal that will execute the given action upon subscription,
-// then forward all events from the generated signal.
-func NewSignal(didSubscribe func(subscriber Subscriber)) Signal {
-	return &signal{didSubscribe: didSubscribe}
-}
-
-// Creates a signal that will immediately complete.
-func NewEmptySignal() Signal {
-	return &signal{func(subscriber Subscriber) {
-		subscriber.OnCompleted()
-	}}
-}
-
-// Creates a signal that will immediately yield a single value then
-// complete.
-func NewSingleSignal(value interface{}) Signal {
-	return &signal{func(subscriber Subscriber) {
-		subscriber.OnNext(value)
-		subscriber.OnCompleted()
-	}}
-}
-
-// Creates a signal that will immediately generate an error.
-func NewErrorSignal(err error) Signal {
-	return &signal{func(subscriber Subscriber) {
-		subscriber.OnError(err)
-	}}
-}
-
-// Creates a signal that will never send any events.
-func NewNeverSignal() Signal {
-	return &signal{func(_ Subscriber) {
-	}}
-}
-
-// Creates a signal that will iterate over the given sequence whenever a
-// Subscriber is attached.
-func NewValuesSignal(values []interface{}) Signal {
-	return &signal{func(subscriber Subscriber) {
-		for _, v := range values {
-			subscriber.OnNext(v)
-		}
-		subscriber.OnCompleted()
-	}}
 }
 
 // Utility function to convert a function signature.

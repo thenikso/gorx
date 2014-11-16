@@ -67,6 +67,65 @@ func TestScan(t *testing.T) {
 	}
 }
 
+func TestTake(t *testing.T) {
+	signal := NewValuesSignal([]interface{}{1, 2, 3, 4, 5, 6})
+	result := make([]int, 0)
+	expected := []int{1, 2, 3, 4}
+
+	signal.Take(4).SubscribeAuto(func(v int) {
+		result = append(result, v)
+	})
+
+	if len(result) != len(expected) {
+		t.Fatalf("Expecting `len(result)` to equal %v got %v", len(expected), len(result))
+	}
+	for i, v := range expected {
+		if v != result[i] {
+			t.Fatalf("Expecting %v to equal %v", result, expected)
+		}
+	}
+}
+
+func TestTakeLast(t *testing.T) {
+	signal := NewValuesSignal([]interface{}{1, 2, 3, 4, 5, 6})
+	result := make([]int, 0)
+	expected := []int{3, 4, 5, 6}
+
+	signal.TakeLast(4).SubscribeAuto(func(v int) {
+		result = append(result, v)
+	})
+
+	if len(result) != len(expected) {
+		t.Fatalf("Expecting `len(result)` to equal %v got %v", len(expected), len(result))
+	}
+	for i, v := range expected {
+		if v != result[i] {
+			t.Fatalf("Expecting %v to equal %v", result, expected)
+		}
+	}
+}
+
+func TestTakeWhile(t *testing.T) {
+	signal := NewValuesSignal([]interface{}{1, 2, 3, 4, 5, 6})
+	result := make([]int, 0)
+	expected := []int{1, 2, 3, 4}
+
+	signal.TakeWhileAuto(func(v int) bool {
+		return v < 5
+	}).SubscribeAuto(func(v int) {
+		result = append(result, v)
+	})
+
+	if len(result) != len(expected) {
+		t.Fatalf("Expecting `len(result)` to equal %v got %v", len(expected), len(result))
+	}
+	for i, v := range expected {
+		if v != result[i] {
+			t.Fatalf("Expecting %v to equal %v", result, expected)
+		}
+	}
+}
+
 func TestMergeShouldMergeSignals(t *testing.T) {
 	signal := NewValuesSignal([]interface{}{
 		NewValuesSignal([]interface{}{1, 2}),

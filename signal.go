@@ -29,6 +29,11 @@ type Signal interface {
 	Scan(U, func(U, T) U) Signal
 	ScanAuto(U, interface{}) Signal
 
+	Take(int) Signal
+	TakeLast(int) Signal
+	TakeWhile(func(T) bool) Signal
+	TakeWhileAuto(interface{}) Signal
+
 	Merge() Signal
 }
 
@@ -199,6 +204,90 @@ func (signal *signal) ScanAuto(initial U, p interface{}) Signal {
 		panic(err)
 	}
 	return signal.Scan(initial, f.(func(U, T) U))
+}
+
+/// Returns a signal that will yield the first `count` values from the
+/// receiver.
+func (signal *signal) Take(count int) Signal {
+	if count < 0 {
+		panic("Signal.Take: count parameter should be >= 0")
+	}
+
+	if count == 0 {
+		return NewEmptySignal()
+	}
+
+	return signal.mapAccumulate(0, func(n interface{}, value T) (interface{}, U) {
+		var newN interface{}
+		if n.(int)+1 < count {
+			newN = n.(int) + 1
+		}
+		return newN, value
+	})
+}
+
+/// Waits for the receiver to complete successfully, then forwards only the
+/// last `count` values.
+func (signal *signal) TakeLast(count int) Signal {
+	if count < 0 {
+		panic("Signal.TakeLast: count parameter should be >= 0")
+	}
+
+	if count == 0 {
+		return signal.Filter(func(_ T) bool {
+			return false
+		})
+	}
+
+	return NewSignal(func(subscriber Subscriber) {
+		values := NewAtomic(make([]T, 0))
+		disposable := signal.SubscribeFunc(
+			func(value T) {
+				values.Modify(func(a interface{}) interface{} {
+					arr := a.([]T)
+					arr = append(arr, value)
+
+					if len(arr) > count {
+						return arr[(len(arr) - count):]
+					}
+
+					return arr
+				})
+			},
+			func(err error) {
+				subscriber.OnError(err)
+			},
+			func() {
+				for _, v := range values.Value().([]T) {
+					subscriber.OnNext(v)
+				}
+
+				subscriber.OnCompleted()
+			},
+		)
+
+		subscriber.Disposable().AddDisposable(disposable)
+	})
+}
+
+// Returns a signal that will yield values from the receiver while
+// `predicate` remains `true`.
+func (signal *signal) TakeWhile(predicate func(T) bool) Signal {
+	return signal.mapAccumulate(true, func(taking interface{}, value T) (interface{}, U) {
+		if taking.(bool) && predicate(value) {
+			return true, NewSingleSignal(value)
+		} else {
+			return nil, NewEmptySignal()
+		}
+	}).Merge()
+}
+
+func (signal *signal) TakeWhileAuto(p interface{}) Signal {
+	f, err := castFunc(p, (func(T) bool)(nil))
+	if err != nil {
+		panic(err)
+	}
+	return signal.TakeWhile(f.(func(T) bool))
 }
 
 // Merges a signal of signals down into a single signal, biased toward the

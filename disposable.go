@@ -121,3 +121,63 @@ func NewCompositeDisposable(action func() error) CompositeDisposable {
 	disposable.AddDisposableFunc(action)
 	return disposable
 }
+
+// A disposable that will optionally dispose of another disposable.
+type SerialDisposable interface {
+	Disposable
+	InnerDisposable() Disposable
+	SetInnerDisposable(Disposable)
+}
+
+type serialDisposableState struct {
+	innerDisposable Disposable
+	disposed        bool
+}
+
+type serialDisposable struct {
+	state Atomic
+}
+
+func (disposable *serialDisposable) IsDisposed() bool {
+	return disposable.state.Value().(serialDisposableState).disposed
+}
+
+func (disposable *serialDisposable) Dispose() error {
+	orig := disposable.state.Swap(serialDisposableState{
+		innerDisposable: nil,
+		disposed:        true,
+	})
+	if d := orig.(serialDisposableState).innerDisposable; d != nil {
+		return d.Dispose()
+	}
+	return nil
+}
+
+func (disposable *serialDisposable) InnerDisposable() Disposable {
+	return disposable.state.Value().(serialDisposableState).innerDisposable
+}
+
+func (disposable *serialDisposable) SetInnerDisposable(inner Disposable) {
+	oldState := disposable.state.Modify(func(state interface{}) interface{} {
+		return serialDisposableState{
+			innerDisposable: inner,
+			disposed:        state.(serialDisposableState).disposed,
+		}
+	})
+
+	if d := oldState.(serialDisposableState).innerDisposable; d != nil {
+		d.Dispose()
+	}
+	if oldState.(serialDisposableState).disposed {
+		inner.Dispose()
+	}
+}
+
+func NewSerialDisposable(innerDisposable Disposable) SerialDisposable {
+	disposable := &serialDisposable{
+		NewAtomic(serialDisposableState{
+			innerDisposable: innerDisposable,
+			disposed:        false,
+		})}
+	return disposable
+}

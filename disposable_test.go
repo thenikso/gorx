@@ -98,3 +98,65 @@ func TestCompositeDisposableShouldNotPruneActiveDisposables(t *testing.T) {
 		t.Error("Expect `didDispose` to be true")
 	}
 }
+
+func TestSerialDisposableShouldDisposeOfInnerDisposable(t *testing.T) {
+	disposable := NewSerialDisposable(nil)
+
+	simpleDisposable := NewSimpleDisposable()
+	disposable.SetInnerDisposable(simpleDisposable)
+
+	if disposable.InnerDisposable == nil {
+		t.Error("Expect `disposable.InnerDisposable` not to be nil")
+	}
+	if simpleDisposable.IsDisposed() != false {
+		t.Error("Expect `simpleDisposable.IsDisposed()` to be false")
+	}
+	if disposable.IsDisposed() != false {
+		t.Error("Expect `disposable.IsDisposed()` to be false")
+	}
+
+	disposable.Dispose()
+	if disposable.InnerDisposable() != nil {
+		t.Errorf("Expect `disposable.InnerDisposable` to be nil, got %v", disposable.InnerDisposable())
+	}
+	if simpleDisposable.IsDisposed() != true {
+		t.Error("Expect `simpleDisposable.IsDisposed()` to be true")
+	}
+	if disposable.IsDisposed() != true {
+		t.Error("Expect `disposable.IsDisposed()` to be true")
+	}
+}
+
+func TestSerialDisposableShouldDisposeOfPreviousDisposableWhenSwappingInnerDisposable(t *testing.T) {
+	disposable := NewSerialDisposable(nil)
+
+	oldDisposable := NewSimpleDisposable()
+	newDisposable := NewSimpleDisposable()
+	disposable.SetInnerDisposable(oldDisposable)
+
+	if oldDisposable.IsDisposed() != false {
+		t.Error("Expect `oldDisposable.IsDisposed()` to be false")
+	}
+	if newDisposable.IsDisposed() != false {
+		t.Error("Expect `newDisposable.IsDisposed()` to be false")
+	}
+
+	disposable.SetInnerDisposable(newDisposable)
+	if oldDisposable.IsDisposed() != true {
+		t.Error("Expect `oldDisposable.IsDisposed()` to be true")
+	}
+	if newDisposable.IsDisposed() != false {
+		t.Error("Expect `newDisposable.IsDisposed()` to be false")
+	}
+	if disposable.IsDisposed() != false {
+		t.Error("Expect `disposable.IsDisposed()` to be false")
+	}
+
+	disposable.SetInnerDisposable(nil)
+	if newDisposable.IsDisposed() != true {
+		t.Error("Expect `newDisposable.IsDisposed()` to be true")
+	}
+	if disposable.IsDisposed() != false {
+		t.Error("Expect `disposable.IsDisposed()` to be false")
+	}
+}

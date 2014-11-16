@@ -13,6 +13,8 @@ type Signal interface {
 
 	Map(func(interface{}) interface{}) Signal
 	MapAuto(interface{}) Signal
+
+	Merge() Signal
 }
 
 type signal struct {
@@ -144,65 +146,56 @@ func (signal *signal) MapAuto(p interface{}) Signal {
 //
 // Returns a signal that will forward events from the original signals
 // as they arrive.
-// func (signal *signal) Merge() Signal {
-// 	return NewSignal(func(subscriber Subscriber) Disposable {
-// 		disposable := NewCompositeDisposable(nil)
-// 		inFlight := NewAtomic(1)
+func (signal *signal) Merge() Signal {
+	return NewSignal(func(subscriber Subscriber) {
+		disposable := NewCompositeDisposable(nil)
+		inFlight := NewAtomic(1)
 
-// 		decrementInFlight := func() {
-// 			orig = inFlight.Modify(func(v interface{}) interface{} {
-// 				return v.(int) - 1
-// 			})
-// 			if orig == 1 {
-// 				subscriber.OnCompleted()
-// 			}
-// 		}
+		decrementInFlight := func() {
+			orig := inFlight.Modify(func(v interface{}) interface{} {
+				return v.(int) - 1
+			})
+			if orig == 1 {
+				subscriber.OnCompleted()
+			}
+		}
 
-// 		// selfDisposable := signal.Subscribe(...)
-// 	})
-// }
+		selfDisposable := signal.SubscribeFunc(
+			func(stream interface{}) {
+				inFlight.Modify(func(v interface{}) interface{} {
+					return v.(int) + 1
+				})
 
-// public func merge<U>(evidence: ColdSignal -> ColdSignal<ColdSignal<U>>) -> ColdSignal<U> {
-// 	return ColdSignal<U> { subscriber in
-// 		let disposable = CompositeDisposable()
-// 		let inFlight = Atomic(1)
+				streamDisposable := NewSerialDisposable(nil)
+				disposable.AddDisposable(streamDisposable)
 
-// 		let decrementInFlight: () -> () = {
-// 			let orig = inFlight.modify { $0 - 1 }
-// 			if orig == 1 {
-// 				subscriber.put(.Completed)
-// 			}
-// 		}
+				streamDisposable.SetInnerDisposable(stream.(Signal).SubscribeFunc(
+					func(value interface{}) {
+						subscriber.OnNext(value)
+					},
+					func(err error) {
+						streamDisposable.Dispose()
+						disposable.PruneDisposed()
+						subscriber.OnError(err)
+					},
+					func() {
+						streamDisposable.Dispose()
+						disposable.PruneDisposed()
+						decrementInFlight()
+					},
+				))
+			},
+			func(err error) {
+				subscriber.OnError(err)
+			},
+			func() {
+				decrementInFlight()
+			},
+		)
 
-// 		let selfDisposable = evidence(self).start(next: { stream in
-// 			inFlight.modify { $0 + 1 }
-
-// 			let streamDisposable = SerialDisposable()
-// 			disposable.addDisposable(streamDisposable)
-
-// 			streamDisposable.innerDisposable = stream.start(Subscriber { event in
-// 				if event.isTerminating {
-// 					streamDisposable.dispose()
-// 					disposable.pruneDisposed()
-// 				}
-
-// 				switch event {
-// 				case let .Completed:
-// 					decrementInFlight()
-
-// 				default:
-// 					subscriber.put(event)
-// 				}
-// 			})
-// 		}, error: { error in
-// 			subscriber.put(.Error(error))
-// 		}, completed: {
-// 			decrementInFlight()
-// 		})
-
-// 		subscriber.disposable.addDisposable(selfDisposable)
-// 	}
-// }
+		subscriber.Disposable().AddDisposable(selfDisposable)
+	})
+}
 
 // Creates a signal that will execute the given action upon subscription,
 // then forward all events from the generated signal.

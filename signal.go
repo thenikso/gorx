@@ -141,44 +141,6 @@ func (signal *signal) SubscribeAuto(params ...interface{}) Disposable {
 	return signal.Subscribe(subscriber)
 }
 
-// Maps over the elements of the signal, accumulating a state along the
-// way.
-//
-// This is meant as a primitive operator from which more complex operators
-// can be built.
-//
-// Yielding a `nil` state at any point will stop evaluation of the original
-// signal, and dispose of it.
-//
-// Returns a signal of the mapped values.
-func (s *signal) mapAccumulate(initialState interface{}, f func(state interface{}, current interface{}) (newState interface{}, newValue interface{})) Signal {
-	return NewSignal(func(subscriber Subscriber) {
-		state := NewAtomic(initialState)
-		disposable := s.SubscribeFunc(
-			// Next
-			func(value interface{}) {
-				newState, newValue := f(state.Value(), value)
-				subscriber.OnNext(newValue)
-
-				if newState != nil {
-					state.SetValue(newState)
-				} else {
-					subscriber.OnCompleted()
-				}
-			},
-			// Error
-			func(err error) {
-				subscriber.OnError(err)
-			},
-			// Completed
-			func() {
-				subscriber.OnCompleted()
-			},
-		)
-		subscriber.Disposable().AddDisposable(disposable)
-	})
-}
-
 // Maps each value in the stream to a new value.
 func (signal *signal) Map(f func(interface{}) interface{}) Signal {
 	return signal.mapAccumulate(struct{}{}, func(_, value interface{}) (interface{}, interface{}) {
@@ -246,6 +208,44 @@ func (signal *signal) Merge() Signal {
 		)
 
 		subscriber.Disposable().AddDisposable(selfDisposable)
+	})
+}
+
+// Maps over the elements of the signal, accumulating a state along the
+// way.
+//
+// This is meant as a primitive operator from which more complex operators
+// can be built.
+//
+// Yielding a `nil` state at any point will stop evaluation of the original
+// signal, and dispose of it.
+//
+// Returns a signal of the mapped values.
+func (s *signal) mapAccumulate(initialState interface{}, f func(state interface{}, current interface{}) (newState interface{}, newValue interface{})) Signal {
+	return NewSignal(func(subscriber Subscriber) {
+		state := NewAtomic(initialState)
+		disposable := s.SubscribeFunc(
+			// Next
+			func(value interface{}) {
+				newState, newValue := f(state.Value(), value)
+				subscriber.OnNext(newValue)
+
+				if newState != nil {
+					state.SetValue(newState)
+				} else {
+					subscriber.OnCompleted()
+				}
+			},
+			// Error
+			func(err error) {
+				subscriber.OnError(err)
+			},
+			// Completed
+			func() {
+				subscriber.OnCompleted()
+			},
+		)
+		subscriber.Disposable().AddDisposable(disposable)
 	})
 }
 

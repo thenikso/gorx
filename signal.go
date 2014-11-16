@@ -6,6 +6,9 @@ import (
 	"reflect"
 )
 
+type T interface{}
+type U interface{}
+
 // A stream that will begin generating events when a Subscriber is attached,
 // possibly performing some side effects in the process. Events are pushed to
 // the subscriber as they are generated.
@@ -14,13 +17,13 @@ import (
 // of events, or even a different version of events altogether.
 type Signal interface {
 	Subscribe(Subscriber) Disposable
-	SubscribeFunc(func(interface{}), func(error), func()) Disposable
+	SubscribeFunc(func(T), func(error), func()) Disposable
 	SubscribeAuto(...interface{}) Disposable
 
-	Map(func(interface{}) interface{}) Signal
+	Map(func(T) U) Signal
 	MapAuto(interface{}) Signal
 
-	Filter(func(interface{}) bool) Signal
+	Filter(func(T) bool) Signal
 	FilterAuto(interface{}) Signal
 
 	Merge() Signal
@@ -85,12 +88,12 @@ func (signal *signal) Subscribe(subscriber Subscriber) Disposable {
 	return subscriber.Disposable()
 }
 
-func (signal *signal) SubscribeFunc(next func(interface{}), err func(error), completed func()) Disposable {
+func (signal *signal) SubscribeFunc(next func(T), err func(error), completed func()) Disposable {
 	return signal.Subscribe(NewSubscriber(next, err, completed))
 }
 
 func (signal *signal) SubscribeAuto(params ...interface{}) Disposable {
-	var nextFunc func(interface{})
+	var nextFunc func(T)
 	var errFunc func(error)
 	var compFunc func()
 	var subscriber Subscriber
@@ -110,7 +113,7 @@ func (signal *signal) SubscribeAuto(params ...interface{}) Disposable {
 			if nextFunc != nil {
 				panic("'Next' function already defined")
 			}
-			nextFunc = p.(func(interface{}))
+			nextFunc = p.(func(T))
 		case Subscriber:
 			if subscriber != nil {
 				panic("Subscriber already defined")
@@ -126,7 +129,7 @@ func (signal *signal) SubscribeAuto(params ...interface{}) Disposable {
 			}
 			nextFuncV := reflect.ValueOf(p)
 			nextArgT := nextFuncT.In(0)
-			nextFunc = func(v interface{}) {
+			nextFunc = func(v T) {
 				vV := reflect.ValueOf(v)
 				if vV.Type().AssignableTo(nextArgT) {
 					nextFuncV.Call([]reflect.Value{vV})
@@ -145,23 +148,23 @@ func (signal *signal) SubscribeAuto(params ...interface{}) Disposable {
 }
 
 // Maps each value in the stream to a new value.
-func (signal *signal) Map(f func(interface{}) interface{}) Signal {
-	return signal.mapAccumulate(struct{}{}, func(_, value interface{}) (interface{}, interface{}) {
+func (signal *signal) Map(f func(T) U) Signal {
+	return signal.mapAccumulate(struct{}{}, func(_ interface{}, value T) (interface{}, U) {
 		return struct{}{}, f(value)
 	})
 }
 
 func (signal *signal) MapAuto(p interface{}) Signal {
-	mapFunc, err := castFunc(p, (func(interface{}) interface{})(nil))
+	mapFunc, err := castFunc(p, (func(T) U)(nil))
 	if err != nil {
 		panic(err)
 	}
-	return signal.Map(mapFunc.(func(interface{}) interface{}))
+	return signal.Map(mapFunc.(func(T) U))
 }
 
 // Preserves only the values of the signal that pass the given predicate.
-func (signal *signal) Filter(predicate func(interface{}) bool) Signal {
-	return signal.Map(func(value interface{}) interface{} {
+func (signal *signal) Filter(predicate func(T) bool) Signal {
+	return signal.Map(func(value T) U {
 		if predicate(value) {
 			return NewSingleSignal(value)
 		} else {
@@ -171,11 +174,11 @@ func (signal *signal) Filter(predicate func(interface{}) bool) Signal {
 }
 
 func (signal *signal) FilterAuto(p interface{}) Signal {
-	predicateFunc, err := castFunc(p, (func(interface{}) bool)(nil))
+	predicateFunc, err := castFunc(p, (func(T) bool)(nil))
 	if err != nil {
 		panic(err)
 	}
-	return signal.Filter(predicateFunc.(func(interface{}) bool))
+	return signal.Filter(predicateFunc.(func(T) bool))
 }
 
 // Merges a signal of signals down into a single signal, biased toward the
@@ -198,7 +201,7 @@ func (signal *signal) Merge() Signal {
 		}
 
 		selfDisposable := signal.SubscribeFunc(
-			func(stream interface{}) {
+			func(stream T) {
 				inFlight.Modify(func(v interface{}) interface{} {
 					return v.(int) + 1
 				})
@@ -207,8 +210,8 @@ func (signal *signal) Merge() Signal {
 				disposable.AddDisposable(streamDisposable)
 
 				streamDisposable.SetInnerDisposable(stream.(Signal).SubscribeFunc(
-					func(value interface{}) {
-						subscriber.OnNext(value)
+					func(value T) {
+						subscriber.OnNext(value.(interface{}))
 					},
 					func(err error) {
 						streamDisposable.Dispose()
@@ -244,12 +247,12 @@ func (signal *signal) Merge() Signal {
 // signal, and dispose of it.
 //
 // Returns a signal of the mapped values.
-func (s *signal) mapAccumulate(initialState interface{}, f func(state interface{}, current interface{}) (newState interface{}, newValue interface{})) Signal {
+func (s *signal) mapAccumulate(initialState interface{}, f func(state interface{}, current T) (newState interface{}, newValue U)) Signal {
 	return NewSignal(func(subscriber Subscriber) {
 		state := NewAtomic(initialState)
 		disposable := s.SubscribeFunc(
 			// Next
-			func(value interface{}) {
+			func(value T) {
 				newState, newValue := f(state.Value(), value)
 				subscriber.OnNext(newValue)
 

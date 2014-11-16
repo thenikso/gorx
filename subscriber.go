@@ -2,20 +2,20 @@ package rx
 
 // An Subscriber is a receiver of events from an Signal.
 type Subscriber interface {
-	OnNext(interface{})
+	OnNext(T)
 	OnError(error)
 	OnCompleted()
 	Disposable() CompositeDisposable
 }
 
 type subscriber struct {
-	nextFunc   func(interface{})
+	nextFunc   func(T)
 	errFunc    func(error)
 	compFunc   func()
 	disposable CompositeDisposable
 }
 
-func (o *subscriber) OnNext(value interface{}) {
+func (o *subscriber) OnNext(value T) {
 	if o.nextFunc != nil {
 		o.nextFunc(value)
 	}
@@ -39,7 +39,7 @@ func (o *subscriber) Disposable() CompositeDisposable {
 	return o.disposable
 }
 
-func NewSubscriber(next func(interface{}), err func(error), completed func()) Subscriber {
+func NewSubscriber(next func(T), err func(error), completed func()) Subscriber {
 	var subscriber = &subscriber{
 		nextFunc: next,
 		errFunc:  err,

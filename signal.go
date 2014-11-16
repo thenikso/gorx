@@ -20,6 +20,9 @@ type Signal interface {
 	Map(func(interface{}) interface{}) Signal
 	MapAuto(interface{}) Signal
 
+	Filter(func(interface{}) bool) Signal
+	FilterAuto(interface{}) Signal
+
 	Merge() Signal
 }
 
@@ -147,12 +150,32 @@ func (signal *signal) Map(f func(interface{}) interface{}) Signal {
 		return struct{}{}, f(value)
 	})
 }
+
 func (signal *signal) MapAuto(p interface{}) Signal {
 	mapFunc, err := castFunc(p, (func(interface{}) interface{})(nil))
 	if err != nil {
 		panic(err)
 	}
 	return signal.Map(mapFunc.(func(interface{}) interface{}))
+}
+
+// Preserves only the values of the signal that pass the given predicate.
+func (signal *signal) Filter(predicate func(interface{}) bool) Signal {
+	return signal.Map(func(value interface{}) interface{} {
+		if predicate(value) {
+			return NewSingleSignal(value)
+		} else {
+			return NewEmptySignal()
+		}
+	}).Merge()
+}
+
+func (signal *signal) FilterAuto(p interface{}) Signal {
+	predicateFunc, err := castFunc(p, (func(interface{}) bool)(nil))
+	if err != nil {
+		panic(err)
+	}
+	return signal.Filter(predicateFunc.(func(interface{}) bool))
 }
 
 // Merges a signal of signals down into a single signal, biased toward the

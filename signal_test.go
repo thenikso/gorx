@@ -1,7 +1,8 @@
-package rx
+package main
 
 import (
 	"testing"
+	"fmt"
 )
 
 func TestMapShouldMapInput(t *testing.T) {
@@ -54,6 +55,28 @@ func TestScan(t *testing.T) {
 	signal.ScanAuto(100, func(state int, current int) int {
 		return state + current
 	}).SubscribeAuto(func(v int) {
+		result = append(result, v)
+	})
+
+	if len(result) != len(expected) {
+		t.Fatalf("Expecting `len(result)` to equal %v got %v", len(expected), len(result))
+	}
+	for i, v := range expected {
+		if v != result[i] {
+			t.Fatalf("Expecting %v to equal %v", result, expected)
+		}
+	}
+}
+
+func TestReduce(t *testing.T) {
+	signal := NewValuesSignal([]interface{}{1, 2, 3, 4, 5, 6})
+	result := make([]int, 0)
+	expected := []int{2}
+
+	signal.ReduceAuto(0, func(acc int, curr int) int {
+		return acc + curr
+	}).SubscribeAuto(func(v int) {
+		fmt.Printf("fin %d\n", v)
 		result = append(result, v)
 	})
 
@@ -136,6 +159,27 @@ func TestMergeShouldMergeSignals(t *testing.T) {
 	expected := []int{1, 2, 3, 4, 5, 6}
 
 	signal.Merge().SubscribeAuto(func(v int) {
+		result = append(result, v)
+	})
+
+	if len(result) != len(expected) {
+		t.Fatalf("Expecting `len(result)` to equal %v got %v", len(expected), len(result))
+	}
+	for i, v := range expected {
+		if v != result[i] {
+			t.Fatalf("Expecting %v to equal %v", result, expected)
+		}
+	}
+}
+
+func TestConcatWith(t *testing.T) {
+	result := make([]int, 0)
+	expected := []int{1, 2, 3, 4, 5, 6}
+
+	NewValuesSignal([]interface{}{1, 2}).
+		ConcatWith(NewValuesSignal([]interface{}{3, 4})).
+		ConcatWith(NewValuesSignal([]interface{}{5, 6})).
+		SubscribeAuto(func(v int) {
 		result = append(result, v)
 	})
 

@@ -1,4 +1,4 @@
-package rx
+package main
 
 // An Subscriber is a receiver of events from an Signal.
 type Subscriber interface {

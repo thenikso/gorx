@@ -1,4 +1,4 @@
-package rx
+package main
 
 import (
 	"errors"
@@ -29,12 +29,18 @@ type Signal interface {
 	Scan(U, func(U, T) U) Signal
 	ScanAuto(U, interface{}) Signal
 
+	Reduce(U, func(U, T) U) Signal
+	ReduceAuto(U, interface{}) Signal
+
 	Take(int) Signal
 	TakeLast(int) Signal
 	TakeWhile(func(T) bool) Signal
 	TakeWhileAuto(interface{}) Signal
 
 	Merge() Signal
+
+	Concat() Signal
+	ConcatWith(s Signal) Signal
 }
 
 type signal struct {
@@ -206,6 +212,23 @@ func (signal *signal) ScanAuto(initial U, p interface{}) Signal {
 	return signal.Scan(initial, f.(func(U, T) U))
 }
 
+// Combines all of the values in the stream.
+//
+// Returns a signal which will send the single, aggregated value when
+// the receiver completes.
+func (signal *signal) Reduce(initial U, f func(U, T) U) Signal {
+	scanned := signal.Scan(initial, f)
+	return NewSingleSignal(initial).ConcatWith(scanned).TakeLast(1)
+}
+
+func (signal *signal) ReduceAuto(initial U, p interface{}) Signal {
+	f, err := castFunc(p, (func(U, T) U)(nil))
+	if err != nil {
+		panic(err)
+	}
+	return signal.Reduce(initial, f.(func(U, T) U))
+}
+
 /// Returns a signal that will yield the first `count` values from the
 /// receiver.
 func (signal *signal) Take(count int) Signal {
@@ -344,6 +367,67 @@ func (signal *signal) Merge() Signal {
 
 		subscriber.Disposable().AddDisposable(selfDisposable)
 	})
+}
+
+// Concatenates each inner signal with the previous and next inner signals.
+//
+// Returns a signal that will forward events from each of the original
+// signals, in sequential order.
+func (signal *signal) Concat() Signal {
+	return NewSignal(func(subscriber Subscriber) {
+		// TODO fix implementation to not rely on channel size
+		// also check if this all makes sense
+		concatChan := make(chan Signal, 10)
+		var currentSignal Signal
+		var subscribeToNextSignal func()
+		subscribeToNextSignal = func() {
+			if currentSignal != nil {
+				return
+			}
+			select {
+			case currentSignal, more := <-concatChan:
+				if !more {
+					subscriber.OnCompleted()
+					return
+				}
+				signalDisposable := currentSignal.SubscribeFunc(
+					func(v T) {
+						subscriber.OnNext(v)
+					},
+					func(err error) {
+						subscriber.OnError(err)
+					},
+					func() {
+						subscribeToNextSignal()
+					},
+				)
+				subscriber.Disposable().AddDisposable(signalDisposable)
+			default:
+			}
+		}
+
+		selfDisposable := signal.SubscribeFunc(
+			func(signal T) {
+				fmt.Println("1")
+				concatChan <- signal.(Signal)
+				subscribeToNextSignal()
+			},
+			func(err error) {
+				subscriber.OnError(err)
+			},
+			func() {
+				fmt.Println("e")
+				close(concatChan)
+			},
+		)
+
+		subscriber.Disposable().AddDisposable(selfDisposable)
+	})
+}
+
+/// Concatenates the given signal after the receiver.
+func (signal *signal) ConcatWith(s Signal) Signal {
+	return NewValuesSignal([]interface{}{signal, s}).Concat()
 }
 
 // Maps over the elements of the signal, accumulating a state along the

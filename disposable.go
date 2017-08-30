@@ -1,4 +1,4 @@
-package rx
+package main
 
 // Represents something that can be “disposed”, usually associated with freeing
 // resources or canceling work.

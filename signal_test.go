@@ -2,7 +2,6 @@ package main
 
 import (
 	"testing"
-	"fmt"
 )
 
 func TestMapShouldMapInput(t *testing.T) {
@@ -70,13 +69,12 @@ func TestScan(t *testing.T) {
 
 func TestReduce(t *testing.T) {
 	signal := NewValuesSignal([]interface{}{1, 2, 3, 4, 5, 6})
-	result := make([]int, 0)
-	expected := []int{2}
+	result := make([]int, 0, 1)
+	expected := []int{21}
 
 	signal.ReduceAuto(0, func(acc int, curr int) int {
 		return acc + curr
 	}).SubscribeAuto(func(v int) {
-		fmt.Printf("fin %d\n", v)
 		result = append(result, v)
 	})
 
@@ -180,8 +178,8 @@ func TestConcatWith(t *testing.T) {
 		ConcatWith(NewValuesSignal([]interface{}{3, 4})).
 		ConcatWith(NewValuesSignal([]interface{}{5, 6})).
 		SubscribeAuto(func(v int) {
-		result = append(result, v)
-	})
+			result = append(result, v)
+		})
 
 	if len(result) != len(expected) {
 		t.Fatalf("Expecting `len(result)` to equal %v got %v", len(expected), len(result))

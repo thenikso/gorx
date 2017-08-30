@@ -269,7 +269,6 @@ func (signal *signal) TakeLast(count int) Signal {
 				values.Modify(func(a interface{}) interface{} {
 					arr := a.([]T)
 					arr = append(arr, value)
-
 					if len(arr) > count {
 						return arr[(len(arr) - count):]
 					}
@@ -299,9 +298,8 @@ func (signal *signal) TakeWhile(predicate func(T) bool) Signal {
 	return signal.mapAccumulate(true, func(taking interface{}, value T) (interface{}, U) {
 		if taking.(bool) && predicate(value) {
 			return true, NewSingleSignal(value)
-		} else {
-			return nil, NewEmptySignal()
 		}
+		return nil, NewEmptySignal()
 	}).Merge()
 }
 
@@ -408,7 +406,6 @@ func (signal *signal) Concat() Signal {
 
 		selfDisposable := signal.SubscribeFunc(
 			func(signal T) {
-				fmt.Println("1")
 				concatChan <- signal.(Signal)
 				subscribeToNextSignal()
 			},
@@ -416,7 +413,6 @@ func (signal *signal) Concat() Signal {
 				subscriber.OnError(err)
 			},
 			func() {
-				fmt.Println("e")
 				close(concatChan)
 			},
 		)
@@ -440,10 +436,10 @@ func (signal *signal) ConcatWith(s Signal) Signal {
 // signal, and dispose of it.
 //
 // Returns a signal of the mapped values.
-func (s *signal) mapAccumulate(initialState interface{}, f func(state interface{}, current T) (newState interface{}, newValue U)) Signal {
+func (signal *signal) mapAccumulate(initialState interface{}, f func(state interface{}, current T) (newState interface{}, newValue U)) Signal {
 	return NewSignal(func(subscriber Subscriber) {
 		state := NewAtomic(initialState)
-		disposable := s.SubscribeFunc(
+		disposable := signal.SubscribeFunc(
 			// Next
 			func(value T) {
 				newState, newValue := f(state.Value(), value)
